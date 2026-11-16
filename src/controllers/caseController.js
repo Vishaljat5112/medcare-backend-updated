@@ -363,6 +363,23 @@ export const updateCase = async (req, res) => {
       }
     });
 
+    if (!existing) {
+      return res.status(404).json({ error: 'Case not found.' });
+    }
+
+    // Role-based security check for Doctor modifying restricted clinical assessment doc storage
+    if (req.user?.role === 'Doctor' && data.clinicalDocStorage && typeof data.clinicalDocStorage === 'object') {
+      const restrictedDocKeys = ['anikLaser', 'davEswt', 'tpiForm', 'tecarForm'];
+      const targetKeys = Object.keys(data.clinicalDocStorage);
+      const isTryingToModifyRestricted = targetKeys.some(k => restrictedDocKeys.some(rdk => k.toLowerCase().includes(rdk.toLowerCase())));
+      if (isTryingToModifyRestricted) {
+        return res.status(403).json({
+          error: 'Access forbidden: Doctor role is restricted to Pain Management and Counseling assessment forms only.',
+          code: 'DOCTOR_ASSESSMENT_FORBIDDEN'
+        });
+      }
+    }
+
     if (data.selectedInjuryAreas !== undefined || data.otherInjuryAreaSpecify !== undefined) {
       await prisma.patient.update({
         where: { id: existing.patientId },

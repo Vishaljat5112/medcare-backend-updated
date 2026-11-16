@@ -1616,6 +1616,13 @@ export const getCounselingVisitsForPatient = async (req, res) => {
     }
 
     const resolvedPatientId = patient.id;
+    const patientIds = [resolvedPatientId];
+    if (patient.patientId && patient.patientId !== resolvedPatientId) {
+      patientIds.push(patient.patientId);
+    }
+    const patientCaseIds = (patient.cases || []).map(c => c.id).filter(Boolean);
+    const patientCaseNumbers = (patient.cases || []).map(c => c.caseId).filter(Boolean);
+
     const targetCase = caseId 
       ? patient.cases.find(c => c.id === caseId || c.caseId === caseId) || patient.cases[0]
       : patient.cases[0];
@@ -1623,12 +1630,20 @@ export const getCounselingVisitsForPatient = async (req, res) => {
     // 2. Find counseling appointments/visits for this patient
     const visits = await prisma.appointment.findMany({
       where: {
-        patientId: resolvedPatientId,
         OR: [
-          { providerId: 'prov-counselor' },
-          { appointmentType: { contains: 'Psychotherapy' } },
-          { appointmentType: { contains: 'Counseling' } },
-          { cptCode: { in: ['90791', '90834', '90837', '90832', '90847', '90853'] } }
+          { patientId: { in: patientIds } },
+          ...(patientCaseIds.length > 0 ? [{ caseId: { in: patientCaseIds } }] : []),
+          ...(patientCaseNumbers.length > 0 ? [{ caseId: { in: patientCaseNumbers } }] : [])
+        ],
+        AND: [
+          {
+            OR: [
+              { providerId: 'prov-counselor' },
+              { appointmentType: { contains: 'Psychotherapy' } },
+              { appointmentType: { contains: 'Counseling' } },
+              { cptCode: { in: ['90791', '90834', '90837', '90832', '90847', '90853'] } }
+            ]
+          }
         ]
       },
       orderBy: { date: 'asc' }
@@ -1637,10 +1652,18 @@ export const getCounselingVisitsForPatient = async (req, res) => {
     // 3. Find clinical notes for this patient and prov-counselor
     const notes = await prisma.clinicalNote.findMany({
       where: {
-        patientId: resolvedPatientId,
         OR: [
-          { providerId: 'prov-counselor' },
-          { noteType: { contains: 'COUNSEL' } }
+          { patientId: { in: patientIds } },
+          ...(patientCaseIds.length > 0 ? [{ caseId: { in: patientCaseIds } }] : []),
+          ...(patientCaseNumbers.length > 0 ? [{ caseId: { in: patientCaseNumbers } }] : [])
+        ],
+        AND: [
+          {
+            OR: [
+              { providerId: 'prov-counselor' },
+              { noteType: { contains: 'COUNSEL' } }
+            ]
+          }
         ]
       }
     });
@@ -1697,8 +1720,9 @@ export const getCounselingVisitsForPatient = async (req, res) => {
       const matchingNote = notes.find(n => {
         const parsedContent = typeof n.content === 'string' ? (() => { try { return JSON.parse(n.content); } catch(e){ return {}; } })() : (n.content || {});
         return parsedContent.appointmentId === v.id || 
-               (n.date === v.date && parsedContent.cptCode === v.cptCode) ||
-               (n.title && n.title.includes(v.id));
+               n.appointmentId === v.id ||
+               (n.title && n.title.includes(v.id)) ||
+               (n.date === v.date && (parsedContent.cptCode === v.cptCode || n.title?.includes(v.cptCode)));
       });
 
       let fee = 180.00;
@@ -1847,10 +1871,21 @@ export const syncCounselingBill = async (req, res) => {
     }
 
     // 2. Fetch the visits to be billed
+    const patientIds = [patient.id];
+    if (patient.patientId && patient.patientId !== patient.id) {
+      patientIds.push(patient.patientId);
+    }
+    const patientCaseIds = (patient.cases || []).map(c => c.id).filter(Boolean);
+    const patientCaseNumbers = (patient.cases || []).map(c => c.caseId).filter(Boolean);
+
     const visits = await prisma.appointment.findMany({
       where: {
         id: { in: selectedVisitIds },
-        patientId: patient.id
+        OR: [
+          { patientId: { in: patientIds } },
+          ...(patientCaseIds.length > 0 ? [{ caseId: { in: patientCaseIds } }] : []),
+          ...(patientCaseNumbers.length > 0 ? [{ caseId: { in: patientCaseNumbers } }] : [])
+        ]
       }
     });
 
